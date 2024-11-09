@@ -1,0 +1,20 @@
+{
+  "name": "ton-wallet-manager",
+  "version": "1.0.0",
+  "description": "TON Wallet Manager",
+  "main": "konak.js",
+  "scripts": {
+    "start": "node konak.js"
+  },
+  "dependencies": {
+    "@ton/ton": "^15.1.0",
+    "@ton/crypto": "^3.2.0",
+    "@ton/core": "^0.59.0",
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1",
+    "int64-buffer": "^1.0.1",
+    "node-fetch": "^2.7.0",
+    "buffer": "^6.0.3"
+  },
+  "type": "commonjs"
+}
