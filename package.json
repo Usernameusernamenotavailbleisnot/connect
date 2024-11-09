@@ -7,14 +7,15 @@
     "start": "node konak.js"
   },
   "dependencies": {
-    "@ton/ton": "^15.1.0",
-    "@ton/crypto": "^3.2.0",
     "@ton/core": "^0.59.0",
-    "tweetnacl": "^1.0.3",
-    "tweetnacl-util": "^0.15.1",
+    "@ton/crypto": "^3.2.0",
+    "@ton/ton": "^15.1.0",
+    "buffer": "^6.0.3",
+    "https-proxy-agent": "^7.0.5",
     "int64-buffer": "^1.0.1",
     "node-fetch": "^2.7.0",
-    "buffer": "^6.0.3"
+    "tweetnacl": "^1.0.3",
+    "tweetnacl-util": "^0.15.1"
   },
   "type": "commonjs"
 }
