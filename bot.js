@@ -14,6 +14,7 @@ const { Address } = require('@ton/core');
 const { sha256_sync } = require('@ton/crypto');
 const fetch = require('node-fetch');
 const { Buffer } = require('buffer');
+const { YesCoinService } = require('./core/yescoingold');
 
 process.noDeprecation = true;
 
@@ -398,6 +399,30 @@ async function processWalletData(walletData, version) {
     }
 }
 
+async function selectPlatform() {
+    console.log("\n" + "=".repeat(50));
+    console.log("Select Platform".padStart(30));
+    console.log("=".repeat(50));
+    
+    const platform = await askQuestion(
+        "Choose platform:\n" +
+        "1. Blum\n" +
+        "2. YesCoin\n" +
+        "Select (1-2): "
+    );
+
+    return platform === "2" ? "yescoin" : "blum";
+}
+
+async function getServiceInstance(platform, token, wallet) {
+    if (platform === "yescoin") {
+        const service = new YesCoinService();
+        return service.init(token, wallet);
+    }
+    const service = new BlumService();
+    return service.init(token, wallet);
+}
+
 async function selectWalletVersion() {
     console.log("\n" + "=".repeat(50));
     console.log("Select Wallet Version".padStart(30));
@@ -462,9 +487,9 @@ function loadData() {
     }
 }
 
-async function processWallets(action, queryIds, walletData, version) {
+async function processWallets(action, queryIds, walletData, version, platform) {
     console.log("\n" + "=".repeat(90));
-    console.log(`${action === "1" ? "Connecting" : action === "2" ? "Disconnecting" : "Displaying"} ${version.toUpperCase()} Wallets`.padStart(55));
+    console.log(`${action === "1" ? "Connecting" : action === "2" ? "Disconnecting" : "Displaying"} ${version.toUpperCase()} Wallets on ${platform.toUpperCase()}`.padStart(55));
     console.log("=".repeat(90) + "\n");
 
     let totalBalance = 0;
@@ -475,18 +500,29 @@ async function processWallets(action, queryIds, walletData, version) {
         console.log(`\nProcessing Wallet ${i + 1}/${queryIds.length}`);
         console.log("-".repeat(30));
 
-        const blumService = new BlumService();
-        const token = await blumService.getNewToken(queryIds[i]);
-
-        if (!token) {
-            console.log(`❌ Account ${i + 1} - Failed to get token`);
-            failCount++;
-            continue;
-        }
-
         try {
             const processedWallet = await processWalletData(walletData[i], version);
-            const service = blumService.init(token, processedWallet);
+            let service;
+            
+            if (platform === "yescoin") {
+                service = new YesCoinService();
+                const token = await service.login(queryIds[i]);
+                if (!token) {
+                    console.log(`❌ Account ${i + 1} - Failed to login`);
+                    failCount++;
+                    continue;
+                }
+                service.init(token, processedWallet);
+            } else {
+                service = new BlumService();
+                const token = await service.getNewToken(queryIds[i]);
+                if (!token) {
+                    console.log(`❌ Account ${i + 1} - Failed to get token`);
+                    failCount++;
+                    continue;
+                }
+                service.init(token, processedWallet);
+            }
 
             if (action === "1") {
                 const connected = await service.connectWallet();
@@ -495,11 +531,14 @@ async function processWallets(action, queryIds, walletData, version) {
                     console.log(`   Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
                     console.log(`   Address: ${processedWallet.address}`);
 
-                    const balanceInfo = await service.getBalance();
-                    if (balanceInfo) {
-                        const balance = parseFloat(balanceInfo.availableBalance);
-                        totalBalance += balance;
-                        console.log(`   Balance: ${balance}`);
+                    // Only check balance for Blum platform
+                    if (platform === "blum" && typeof service.getBalance === 'function') {
+                        const balanceInfo = await service.getBalance();
+                        if (balanceInfo) {
+                            const balance = parseFloat(balanceInfo.availableBalance);
+                            totalBalance += balance;
+                            console.log(`   Balance: ${balance}`);
+                        }
                     }
                     successCount++;
                 } else {
@@ -519,9 +558,12 @@ async function processWallets(action, queryIds, walletData, version) {
                 console.log(`Account ${i + 1}:`);
                 console.log(`Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
                 console.log(`Address: ${processedWallet.address}`);
-                const balanceInfo = await service.getBalance();
-                if (balanceInfo) {
-                    console.log(`Balance: ${balanceInfo.availableBalance}`);
+                // Only check balance for Blum platform
+                if (platform === "blum" && typeof service.getBalance === 'function') {
+                    const balanceInfo = await service.getBalance();
+                    if (balanceInfo) {
+                        console.log(`Balance: ${balanceInfo.availableBalance}`);
+                    }
                 }
                 successCount++;
             }
@@ -533,7 +575,7 @@ async function processWallets(action, queryIds, walletData, version) {
 
     // Print summary
     console.log("\n" + "=".repeat(50));
-    if (action === "1") {
+    if (action === "1" && platform === "blum") {
         console.log(`Total Balance: ${totalBalance.toFixed(2)}`.padStart(35));
     }
     console.log(`Success: ${successCount} | Failed: ${failCount}`.padStart(35));
@@ -542,6 +584,9 @@ async function processWallets(action, queryIds, walletData, version) {
 
 async function main() {
     try {
+        const platform = await selectPlatform();
+        console.log(`Selected platform: ${platform.toUpperCase()}`);
+
         const version = await selectWalletVersion();
         console.log(`Selected version: ${version.toUpperCase()}`);
 
@@ -562,7 +607,7 @@ async function main() {
             }
 
             if (["1", "2", "3"].includes(action)) {
-                await processWallets(action, queryIds, walletData, version);
+                await processWallets(action, queryIds, walletData, version, platform);
                 
                 const postAction = await askQuestion(
                     "\nChoose an action:\n" +
