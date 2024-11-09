@@ -10,6 +10,8 @@ const { Buffer } = require('buffer');
 const { BlumService } = require('./core/blum');
 const { YesCoinService } = require('./core/yescoingold');
 const { TsubasaService } = require('./core/tsubasa');
+const { PawsService } = require('./core/paws');
+
 
 process.noDeprecation = true;
 
@@ -92,12 +94,14 @@ async function selectPlatform() {
         "1. Blum\n" +
         "2. YesCoin\n" +
         "3. Tsubasa\n" +
-        "Select (1-3): "
+        "4. PAWS\n" +
+        "Select (1-4): "
     );
 
     switch (platform) {
         case "2": return "yescoin";
         case "3": return "tsubasa";
+        case "4": return "paws";
         default: return "blum";
     }
 }
@@ -110,6 +114,9 @@ async function getServiceInstance(platform, token, wallet) {
         case "tsubasa":
             const tsubasaService = new TsubasaService();
             return tsubasaService.init(token, wallet);
+        case "paws":
+            const pawsService = new PawsService();
+            return pawsService.init(token, wallet);
         default:
             const blumService = new BlumService();
             return blumService.init(token, wallet);
@@ -151,29 +158,51 @@ async function mainMenu() {
     );
 }
 
-function loadData() {
+function loadData(platform) {
     try {
-        // Read seeds from seed.txt
-        const seeds = fs.readFileSync('seed.txt', 'utf8')
-            .split('\n')
-            .filter(line => line.trim());
+        if (platform === 'paws') {
+            const wallets = fs.readFileSync('wallet.txt', 'utf8')
+                .split('\n')
+                .filter(line => line.trim());
 
-        const queryIds = fs.readFileSync('query.txt', 'utf8')
-            .split('\n')
-            .filter(line => line.trim());
+            const queryIds = fs.readFileSync('query.txt', 'utf8')
+                .split('\n')
+                .filter(line => line.trim());
 
-        if (seeds.length !== queryIds.length) {
-            throw new Error(
-                `Mismatch between seeds (${seeds.length}) and query (${queryIds.length}) count`
-            );
+            if (wallets.length !== queryIds.length) {
+                throw new Error(
+                    `Mismatch between wallets (${wallets.length}) and query (${queryIds.length}) count`
+                );
+            }
+
+            const walletData = wallets.map(address => ({
+                address: address.trim()
+            }));
+
+            console.log(`Loaded ${wallets.length} wallet(s) with matching queries`);
+            return { walletData, queryIds };
+        } else {
+            const seeds = fs.readFileSync('seed.txt', 'utf8')
+                .split('\n')
+                .filter(line => line.trim());
+
+            const queryIds = fs.readFileSync('query.txt', 'utf8')
+                .split('\n')
+                .filter(line => line.trim());
+
+            if (seeds.length !== queryIds.length) {
+                throw new Error(
+                    `Mismatch between seeds (${seeds.length}) and query (${queryIds.length}) count`
+                );
+            }
+
+            const walletData = seeds.map(seed => ({
+                mnemonic: seed
+            }));
+
+            console.log(`Loaded ${seeds.length} wallet(s) with matching queries`);
+            return { walletData, queryIds };
         }
-
-        // Convert seeds to wallet data format
-        const walletData = seeds.map(seed => ({
-            mnemonic: seed
-        }));
-
-        return { walletData, queryIds };
     } catch (error) {
         console.error(`❌ Error loading data: ${error.message}`);
         return null;
@@ -182,7 +211,7 @@ function loadData() {
 
 async function processWallets(action, queryIds, walletData, version, platform) {
     console.log("\n" + "=".repeat(90));
-    console.log(`${action === "1" ? "Connecting" : action === "2" ? "Disconnecting" : "Displaying"} ${version.toUpperCase()} Wallets on ${platform.toUpperCase()}`.padStart(55));
+    console.log(`${action === "1" ? "Connecting" : action === "2" ? "Disconnecting" : "Displaying"} ${platform === "paws" ? "" : version.toUpperCase() + " "}Wallets on ${platform.toUpperCase()}`.padStart(55));
     console.log("=".repeat(90) + "\n");
 
     let totalBalance = 0;
@@ -194,38 +223,70 @@ async function processWallets(action, queryIds, walletData, version, platform) {
         console.log("-".repeat(30));
 
         try {
-            const processedWallet = await processWalletData(walletData[i], version);
+            let processedWallet;
             let service;
-            
-            if (platform === "tsubasa") {
-                service = new TsubasaService();
-                await service.init(queryIds[i], processedWallet);
-            } else if (platform === "yescoin") {
-                service = new YesCoinService();
-                const token = await service.login(queryIds[i]);
-                if (!token) {
+
+            if (platform === 'paws') {
+                const walletAddress = walletData[i].address;
+                if (!walletAddress) {
+                    console.log(`❌ Account ${i + 1} - Invalid wallet address`);
+                    failCount++;
+                    continue;
+                }
+
+                processedWallet = { address: walletAddress };
+                service = new PawsService();
+                const pawsToken = await service.login(queryIds[i]);
+                
+                if (!pawsToken) {
                     console.log(`❌ Account ${i + 1} - Failed to login`);
                     failCount++;
                     continue;
                 }
-                service.init(token, processedWallet);
-            } else {
-                service = new BlumService();
-                const token = await service.getNewToken(queryIds[i]);
-                if (!token) {
-                    console.log(`❌ Account ${i + 1} - Failed to get token`);
+
+                const initialized = await service.init(pawsToken, processedWallet);
+                if (!initialized) {
+                    console.log(`❌ Account ${i + 1} - Failed to initialize service`);
                     failCount++;
                     continue;
                 }
-                service.init(token, processedWallet);
+            } else {
+                processedWallet = await processWalletData(walletData[i], version);
+                
+                if (platform === "tsubasa") {
+                    service = new TsubasaService();
+                    await service.init(queryIds[i], processedWallet);
+                } else if (platform === "yescoin") {
+                    service = new YesCoinService();
+                    const token = await service.login(queryIds[i]);
+                    if (!token) {
+                        console.log(`❌ Account ${i + 1} - Failed to login`);
+                        failCount++;
+                        continue;
+                    }
+                    service.init(token, processedWallet);
+                } else {
+                    service = new BlumService();
+                    const token = await service.getNewToken(queryIds[i]);
+                    if (!token) {
+                        console.log(`❌ Account ${i + 1} - Failed to get token`);
+                        failCount++;
+                        continue;
+                    }
+                    service.init(token, processedWallet);
+                }
             }
 
             if (action === "1") {
                 const connected = await service.connectWallet();
                 if (connected) {
                     console.log(`✅ Account ${i + 1} - Wallet connection successful`);
-                    console.log(`   Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
-                    console.log(`   Address: ${processedWallet.address}`);
+                    if (platform === 'paws') {
+                        console.log(`   Address: ${processedWallet.address}`);
+                    } else {
+                        console.log(`   Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
+                        console.log(`   Address: ${processedWallet.address}`);
+                    }
 
                     // Only check balance for Blum platform
                     if (platform === "blum" && typeof service.getBalance === 'function') {
@@ -252,17 +313,20 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                 }
             } else {
                 console.log(`Account ${i + 1}:`);
-                console.log(`Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
-                console.log(`Address: ${processedWallet.address}`);
-                // Only check balance for Blum platform
-                if (platform === "blum" && typeof service.getBalance === 'function') {
-                    const balanceInfo = await service.getBalance();
-                    if (balanceInfo) {
-                        console.log(`Balance: ${balanceInfo.availableBalance}`);
-                    }
+                if (platform === 'paws') {
+                    console.log(`Address: ${processedWallet.address}`);
+                } else {
+                    console.log(`Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
+                    console.log(`Address: ${processedWallet.address}`);
                 }
                 successCount++;
             }
+
+            // Add delay between processing wallets
+            if (i < queryIds.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000));
+            }
+
         } catch (error) {
             console.error(`❌ Account ${i + 1} - Error: ${error.message}`);
             failCount++;
@@ -276,16 +340,23 @@ async function processWallets(action, queryIds, walletData, version, platform) {
     }
     console.log(`Success: ${successCount} | Failed: ${failCount}`.padStart(35));
     console.log("=".repeat(50));
+
+    return { successCount, failCount, totalBalance };
 }
+
 async function main() {
     try {
         const platform = await selectPlatform();
         console.log(`Selected platform: ${platform.toUpperCase()}`);
 
-        const version = await selectWalletVersion();
-        console.log(`Selected version: ${version.toUpperCase()}`);
+        // Version selection tidak diperlukan untuk PAWS
+        const version = platform === 'paws' ? null : await selectWalletVersion();
+        if (version) {
+            console.log(`Selected version: ${version.toUpperCase()}`);
+        }
 
-        const data = loadData();
+        // Pass platform ke loadData
+        const data = loadData(platform);  // Tambahkan parameter platform di sini
         if (!data) {
             throw new Error('Failed to load data');
         }
