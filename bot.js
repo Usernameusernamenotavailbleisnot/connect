@@ -11,6 +11,7 @@ const { BlumService } = require('./core/blum');
 const { YesCoinService } = require('./core/yescoingold');
 const { TsubasaService } = require('./core/tsubasa');
 const { PawsService } = require('./core/paws');
+const { SeedDaoService } = require('./core/seeddao');
 
 
 process.noDeprecation = true;
@@ -95,13 +96,15 @@ async function selectPlatform() {
         "2. YesCoin\n" +
         "3. Tsubasa\n" +
         "4. PAWS\n" +
-        "Select (1-4): "
+        "5. SeedDAO\n" + // Add this line
+        "Select (1-5): " // Update the range
     );
 
     switch (platform) {
         case "2": return "yescoin";
         case "3": return "tsubasa";
         case "4": return "paws";
+        case "5": return "seeddao"; // Add this case
         default: return "blum";
     }
 }
@@ -117,6 +120,9 @@ async function getServiceInstance(platform, token, wallet) {
         case "paws":
             const pawsService = new PawsService();
             return pawsService.init(token, wallet);
+        case "seeddao": // Add this case
+            const seedDaoService = new SeedDaoService();
+            return seedDaoService.init(token, wallet);
         default:
             const blumService = new BlumService();
             return blumService.init(token, wallet);
@@ -250,34 +256,69 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                     failCount++;
                     continue;
                 }
+            } else if (platform === 'seeddao') {
+                try {
+                    if (!version) {
+                        console.log(`❌ Account ${i + 1} - No wallet version specified`);
+                        failCount++;
+                        continue;
+                    }
+
+                    const mnemonic = walletData[i].mnemonic.trim();
+                    if (!mnemonic) {
+                        console.log(`❌ Account ${i + 1} - Invalid mnemonic`);
+                        failCount++;
+                        continue;
+                    }
+
+                    console.log(`Processing ${version.toUpperCase()} wallet...`);
+                    processedWallet = await processWalletData({ mnemonic }, version);
+                    
+                    service = new SeedDaoService();
+                    const initialized = await service.init(queryIds[i], {
+                        ...processedWallet,
+                        mnemonic
+                    }, version);
+
+                    if (!initialized) {
+                        console.log(`❌ Account ${i + 1} - Failed to initialize SeedDAO service`);
+                        failCount++;
+                        continue;
+                    }
+
+                } catch (error) {
+                    console.log(`❌ Account ${i + 1} - Error processing wallet: ${error.message}`);
+                    failCount++;
+                    continue;
+                }
+            } else if (platform === "tsubasa") {
+                processedWallet = await processWalletData(walletData[i], version);
+                service = new TsubasaService();
+                await service.init(queryIds[i], processedWallet);
+            } else if (platform === "yescoin") {
+                processedWallet = await processWalletData(walletData[i], version);
+                service = new YesCoinService();
+                const token = await service.login(queryIds[i]);
+                if (!token) {
+                    console.log(`❌ Account ${i + 1} - Failed to login`);
+                    failCount++;
+                    continue;
+                }
+                await service.init(token, processedWallet);
             } else {
                 processedWallet = await processWalletData(walletData[i], version);
-                
-                if (platform === "tsubasa") {
-                    service = new TsubasaService();
-                    await service.init(queryIds[i], processedWallet);
-                } else if (platform === "yescoin") {
-                    service = new YesCoinService();
-                    const token = await service.login(queryIds[i]);
-                    if (!token) {
-                        console.log(`❌ Account ${i + 1} - Failed to login`);
-                        failCount++;
-                        continue;
-                    }
-                    service.init(token, processedWallet);
-                } else {
-                    service = new BlumService();
-                    const token = await service.getNewToken(queryIds[i]);
-                    if (!token) {
-                        console.log(`❌ Account ${i + 1} - Failed to get token`);
-                        failCount++;
-                        continue;
-                    }
-                    service.init(token, processedWallet);
+                service = new BlumService();
+                const token = await service.getNewToken(queryIds[i]);
+                if (!token) {
+                    console.log(`❌ Account ${i + 1} - Failed to get token`);
+                    failCount++;
+                    continue;
                 }
+                await service.init(token, processedWallet);
             }
 
             if (action === "1") {
+                console.log('Attempting to connect wallet...');
                 const connected = await service.connectWallet();
                 if (connected) {
                     console.log(`✅ Account ${i + 1} - Wallet connection successful`);
@@ -288,7 +329,6 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                         console.log(`   Address: ${processedWallet.address}`);
                     }
 
-                    // Only check balance for Blum platform
                     if (platform === "blum" && typeof service.getBalance === 'function') {
                         const balanceInfo = await service.getBalance();
                         if (balanceInfo) {
@@ -303,6 +343,7 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                     failCount++;
                 }
             } else if (action === "2") {
+                console.log('Attempting to disconnect wallet...');
                 const disconnected = await service.disconnectWallet();
                 if (disconnected) {
                     console.log(`✅ Account ${i + 1} - Wallet disconnected successfully`);
@@ -317,18 +358,21 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                     console.log(`Address: ${processedWallet.address}`);
                 } else {
                     console.log(`Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
-                    console.log(`Address: ${processedWallet.address}`);
+                    console.log(`   Address: ${processedWallet.address}`);
                 }
                 successCount++;
             }
 
             // Add delay between processing wallets
             if (i < queryIds.length - 1) {
-                await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000));
+                const delay = Math.floor(Math.random() * (3000 - 1000 + 1)) + 1000;
+                console.log(`Waiting ${delay}ms before processing next wallet...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
             }
 
         } catch (error) {
-            console.error(`❌ Account ${i + 1} - Error: ${error.message}`);
+            console.error(`❌ Account ${i + 1} - Error:`, error);
+            console.error('Stack trace:', error.stack);
             failCount++;
         }
     }
@@ -346,17 +390,19 @@ async function processWallets(action, queryIds, walletData, version, platform) {
 
 async function main() {
     try {
+        // Platform Selection
         const platform = await selectPlatform();
         console.log(`Selected platform: ${platform.toUpperCase()}`);
 
-        // Version selection tidak diperlukan untuk PAWS
-        const version = platform === 'paws' ? null : await selectWalletVersion();
-        if (version) {
+        // Version Selection (skip for PAWS only)
+        let version = null;
+        if (platform !== 'paws') {
+            version = await selectWalletVersion();
             console.log(`Selected version: ${version.toUpperCase()}`);
         }
 
-        // Pass platform ke loadData
-        const data = loadData(platform);  // Tambahkan parameter platform di sini
+        // Load data from files
+        const data = loadData(platform);
         if (!data) {
             throw new Error('Failed to load data');
         }
@@ -364,6 +410,7 @@ async function main() {
         const { walletData, queryIds } = data;
         console.log(`Loaded ${walletData.length} wallet(s) with matching queries`);
 
+        // Main loop
         while (true) {
             const action = await mainMenu();
             
@@ -373,8 +420,10 @@ async function main() {
             }
 
             if (["1", "2", "3"].includes(action)) {
+                // Process wallets based on selected action
                 await processWallets(action, queryIds, walletData, version, platform);
                 
+                // Post-action menu
                 const postAction = await askQuestion(
                     "\nChoose an action:\n" +
                     "1. Back to main menu\n" +
