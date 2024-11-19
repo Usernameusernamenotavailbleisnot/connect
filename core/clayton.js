@@ -7,28 +7,44 @@ class ClaytonService {
         this.apiBaseId = null;
         this.headers = {
             "Accept": "application/json, text/plain, */*",
-            "Accept-Encoding": "gzip, deflate, br",
             "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             "Origin": "https://tonclayton.fun",
-            "Referer": "https://tonclayton.fun/games",
-            "Sec-Ch-Ua": '"Chromium";v="130", "Microsoft Edge";v="130", "Not?A_Brand";v="99", "Microsoft Edge WebView2";v="130"',
-            "Sec-Ch-Ua-Mobile": "?0",
-            "Sec-Ch-Ua-Platform": '"Windows"',
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-origin",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+            "Referer": "https://tonclayton.fun/"
         };
-        this.knownJsFile = 'index-DM0boQba.js';
         this.initData = null;
         this.wallet = null;
         this.proxy = null;
     }
 
+    encodeInitData(initData) {
+        try {
+            // Remove any whitespace and newlines
+            initData = initData.trim().replace(/\s+/g, '');
+            
+            // Convert special characters to their URL-encoded equivalents
+            const encoded = initData
+                .replace(/"/g, '%22')
+                .replace(/'/g, '%27')
+                .replace(/\(/g, '%28')
+                .replace(/\)/g, '%29')
+                .replace(/</g, '%3C')
+                .replace(/>/g, '%3E')
+                .replace(/\\/g, '%5C')
+                .replace(/\{/g, '%7B')
+                .replace(/\}/g, '%7D');
+            
+            return encoded;
+        } catch (error) {
+            console.error('Error encoding init data:', error);
+            return initData;
+        }
+    }
+
     async init(initData, wallet, proxy = null) {
         try {
-            this.initData = initData;
+            this.initData = this.encodeInitData(initData);
             this.wallet = wallet;
             this.proxy = proxy;
 
@@ -36,13 +52,13 @@ class ClaytonService {
             const loginResult = await this.login();
             
             if (!loginResult.success) {
-                console.log("Failed to login to Clayton");
+                console.error('Login failed:', loginResult.error);
                 return false;
             }
 
             return true;
         } catch (error) {
-            console.error("Error initializing Clayton service:", error);
+            console.error('Init error:', error.message);
             return false;
         }
     }
@@ -52,10 +68,7 @@ class ClaytonService {
             const config = this.proxy ? { httpsAgent: new HttpsProxyAgent(this.proxy) } : {};
             const response = await axios.get(this.baseUrl, {
                 ...config,
-                headers: {
-                    ...this.headers,
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
-                }
+                headers: this.headers
             });
             
             const html = response.data;
@@ -67,10 +80,9 @@ class ClaytonService {
                 latestFile = matches[1].split('/').pop();
             }
 
-            return latestFile || this.knownJsFile;
+            return latestFile || 'index-DM0boQba.js';
         } catch (error) {
-            console.log("Error finding JS file, using default");
-            return this.knownJsFile;
+            return 'index-DM0boQba.js';
         }
     }
 
@@ -92,13 +104,12 @@ class ClaytonService {
             const match = jsContent.match(/_ge="([^"]+)"/);
             
             if (!match || !match[1]) {
-                throw new Error('API Base ID not found');
+                return false;
             }
 
             this.apiBaseId = match[1];
             return true;
         } catch (error) {
-            console.error("Error fetching API Base ID:", error);
             return false;
         }
     }
@@ -109,7 +120,10 @@ class ClaytonService {
         const config = {
             method,
             url: `${this.baseUrl}/api/${this.apiBaseId}/${endpoint}`,
-            headers: { ...this.headers, "Init-Data": this.initData },
+            headers: { 
+                ...this.headers,
+                "Init-Data": this.initData 
+            },
             data
         };
 
@@ -121,7 +135,11 @@ class ClaytonService {
             const response = await axios(config);
             return { success: true, data: response.data };
         } catch (error) {
-            return { success: false, error: error.message };
+            return { 
+                success: false, 
+                error: error.message,
+                details: error.response?.data
+            };
         }
     }
 
@@ -131,11 +149,22 @@ class ClaytonService {
 
     async connectWallet() {
         if (!this.wallet || !this.wallet.address) {
-            console.log("No wallet address provided");
             return false;
         }
 
         const result = await this.makeRequest("user/wallet", "post", {
+            wallet: this.wallet.address
+        });
+
+        return result.success;
+    }
+
+    async disconnectWallet() {
+        if (!this.wallet || !this.wallet.address) {
+            return false;
+        }
+
+        const result = await this.makeRequest("user/wallet/disconnect", "post", {
             wallet: this.wallet.address
         });
 
