@@ -12,6 +12,7 @@ const { YesCoinService } = require('./core/yescoingold');
 const { TsubasaService } = require('./core/tsubasa');
 const { PawsService } = require('./core/paws');
 const { SeedDaoService } = require('./core/seeddao');
+const { ClaytonService } = require('./core/clayton');
 
 
 process.noDeprecation = true;
@@ -96,15 +97,17 @@ async function selectPlatform() {
         "2. YesCoin\n" +
         "3. Tsubasa\n" +
         "4. PAWS\n" +
-        "5. SeedDAO\n" + // Add this line
-        "Select (1-5): " // Update the range
+        "5. SeedDAO\n" + 
+        "6. Clayton\n" + // Tambahkan ini
+        "Select (1-6): " // Update range
     );
 
     switch (platform) {
         case "2": return "yescoin";
         case "3": return "tsubasa";
         case "4": return "paws";
-        case "5": return "seeddao"; // Add this case
+        case "5": return "seeddao";
+        case "6": return "clayton"; // Tambahkan ini
         default: return "blum";
     }
 }
@@ -120,9 +123,12 @@ async function getServiceInstance(platform, token, wallet) {
         case "paws":
             const pawsService = new PawsService();
             return pawsService.init(token, wallet);
-        case "seeddao": // Add this case
+        case "seeddao":
             const seedDaoService = new SeedDaoService();
             return seedDaoService.init(token, wallet);
+        case "clayton": // Tambahkan ini
+            const claytonService = new ClaytonService();
+            return claytonService.init(token, wallet);
         default:
             const blumService = new BlumService();
             return blumService.init(token, wallet);
@@ -166,7 +172,7 @@ async function mainMenu() {
 
 function loadData(platform) {
     try {
-        if (platform === 'paws') {
+        if (platform === 'paws' || platform === 'clayton') {
             const wallets = fs.readFileSync('wallet.txt', 'utf8')
                 .split('\n')
                 .filter(line => line.trim());
@@ -217,7 +223,7 @@ function loadData(platform) {
 
 async function processWallets(action, queryIds, walletData, version, platform) {
     console.log("\n" + "=".repeat(90));
-    console.log(`${action === "1" ? "Connecting" : action === "2" ? "Disconnecting" : "Displaying"} ${platform === "paws" ? "" : version.toUpperCase() + " "}Wallets on ${platform.toUpperCase()}`.padStart(55));
+    console.log(`${action === "1" ? "Connecting" : action === "2" ? "Disconnecting" : "Displaying"} ${platform === "paws" || platform === "clayton" ? "" : version.toUpperCase() + " "}Wallets on ${platform.toUpperCase()}`.padStart(55));
     console.log("=".repeat(90) + "\n");
 
     let totalBalance = 0;
@@ -253,6 +259,23 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                 const initialized = await service.init(pawsToken, processedWallet);
                 if (!initialized) {
                     console.log(`❌ Account ${i + 1} - Failed to initialize service`);
+                    failCount++;
+                    continue;
+                }
+            } else if (platform === 'clayton') {
+                const walletAddress = walletData[i].address;
+                if (!walletAddress) {
+                    console.log(`❌ Account ${i + 1} - Invalid wallet address`);
+                    failCount++;
+                    continue;
+                }
+
+                processedWallet = { address: walletAddress };
+                service = new ClaytonService();
+                const initialized = await service.init(queryIds[i], processedWallet);
+                
+                if (!initialized) {
+                    console.log(`❌ Account ${i + 1} - Failed to initialize Clayton service`);
                     failCount++;
                     continue;
                 }
@@ -322,7 +345,7 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                 const connected = await service.connectWallet();
                 if (connected) {
                     console.log(`✅ Account ${i + 1} - Wallet connection successful`);
-                    if (platform === 'paws') {
+                    if (platform === 'paws' || platform === 'clayton') {
                         console.log(`   Address: ${processedWallet.address}`);
                     } else {
                         console.log(`   Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
@@ -354,7 +377,7 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                 }
             } else {
                 console.log(`Account ${i + 1}:`);
-                if (platform === 'paws') {
+                if (platform === 'paws' || platform === 'clayton') {
                     console.log(`Address: ${processedWallet.address}`);
                 } else {
                     console.log(`Seed: ${walletData[i].mnemonic.substring(0, 20)}...`);
