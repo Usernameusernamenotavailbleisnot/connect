@@ -80,9 +80,9 @@ class ClaytonService {
                 latestFile = matches[1].split('/').pop();
             }
 
-            return latestFile || 'index-DM0boQba.js';
+            return latestFile || 'index-D-b3Y_lZ.js';
         } catch (error) {
-            return 'index-DM0boQba.js';
+            return 'index-D-b3Y_lZ.js';
         }
     }
 
@@ -101,7 +101,7 @@ class ClaytonService {
             });
             
             const jsContent = response.data;
-            const match = jsContent.match(/_ge="([^"]+)"/);
+            const match = jsContent.match(/xCe\s*=\s*"([^"]+)"/);
             
             if (!match || !match[1]) {
                 return false;
