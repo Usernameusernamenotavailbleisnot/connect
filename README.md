@@ -1,6 +1,6 @@
 # Wallet Connector
 
-This project provides a command-line interface (CLI) tool for connecting and interacting with various blockchain platforms and their associated wallets. It supports multiple wallet versions and platforms, including Blum, YesCoin, Tsubasa, PAWS, SeedDAO, and Clayton.
+This project provides a command-line interface (CLI) tool for connecting and interacting with various blockchain platforms and their associated wallets. It supports multiple wallet versions and platforms, including Blum, YesCoin, Tsubasa, PAWS, SeedDAO, Clayton, And Not Pixel
 
 ## Features
 
@@ -62,6 +62,7 @@ The wallet connector currently supports the following platforms:
 - PAWS
 - SeedDAO
 - Clayton
+- Not Pixel
 
 ## Contribution
 
