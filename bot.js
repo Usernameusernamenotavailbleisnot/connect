@@ -13,6 +13,7 @@ const { TsubasaService } = require('./core/tsubasa');
 const { PawsService } = require('./core/paws');
 const { SeedDaoService } = require('./core/seeddao');
 const { ClaytonService } = require('./core/clayton');
+const { NotPixelService } = require('./core/notpixel');
 
 
 process.noDeprecation = true;
@@ -98,8 +99,9 @@ async function selectPlatform() {
         "3. Tsubasa\n" +
         "4. PAWS\n" +
         "5. SeedDAO\n" + 
-        "6. Clayton\n" + // Tambahkan ini
-        "Select (1-6): " // Update range
+        "6. Clayton\n" +
+        "7. NotPixel\n" +
+        "Select (1-7): "
     );
 
     switch (platform) {
@@ -107,7 +109,8 @@ async function selectPlatform() {
         case "3": return "tsubasa";
         case "4": return "paws";
         case "5": return "seeddao";
-        case "6": return "clayton"; // Tambahkan ini
+        case "6": return "clayton";
+        case "7": return "notpixel";
         default: return "blum";
     }
 }
@@ -126,9 +129,12 @@ async function getServiceInstance(platform, token, wallet) {
         case "seeddao":
             const seedDaoService = new SeedDaoService();
             return seedDaoService.init(token, wallet);
-        case "clayton": // Tambahkan ini
+        case "clayton":
             const claytonService = new ClaytonService();
             return claytonService.init(token, wallet);
+        case "notpixel":
+            const notpixelService = new NotPixelService();
+            return notpixelService.init(token, wallet);
         default:
             const blumService = new BlumService();
             return blumService.init(token, wallet);
@@ -172,51 +178,67 @@ async function mainMenu() {
 
 function loadData(platform) {
     try {
+        // Handle platforms that use only wallet addresses (no seed phrase needed)
         if (platform === 'paws' || platform === 'clayton') {
+            // Read wallet addresses
             const wallets = fs.readFileSync('wallet.txt', 'utf8')
                 .split('\n')
                 .filter(line => line.trim());
 
+            // Read query IDs
             const queryIds = fs.readFileSync('query.txt', 'utf8')
                 .split('\n')
                 .filter(line => line.trim());
 
+            // Validate data consistency
             if (wallets.length !== queryIds.length) {
                 throw new Error(
                     `Mismatch between wallets (${wallets.length}) and query (${queryIds.length}) count`
                 );
             }
 
+            // Format wallet data
             const walletData = wallets.map(address => ({
                 address: address.trim()
             }));
 
             console.log(`Loaded ${wallets.length} wallet(s) with matching queries`);
             return { walletData, queryIds };
-        } else {
+        } 
+        // Handle platforms that require seed phrases (including NotPixel)
+        else {
+            // Read seed phrases
             const seeds = fs.readFileSync('seed.txt', 'utf8')
                 .split('\n')
                 .filter(line => line.trim());
 
+            // Read query IDs
             const queryIds = fs.readFileSync('query.txt', 'utf8')
                 .split('\n')
                 .filter(line => line.trim());
 
+            // Validate data consistency
             if (seeds.length !== queryIds.length) {
                 throw new Error(
                     `Mismatch between seeds (${seeds.length}) and query (${queryIds.length}) count`
                 );
             }
 
+            // Format wallet data
             const walletData = seeds.map(seed => ({
-                mnemonic: seed
+                mnemonic: seed.trim()
             }));
 
             console.log(`Loaded ${seeds.length} wallet(s) with matching queries`);
             return { walletData, queryIds };
         }
     } catch (error) {
-        console.error(`❌ Error loading data: ${error.message}`);
+        // Handle common file reading errors
+        if (error.code === 'ENOENT') {
+            console.error(`❌ Required file not found: ${error.path}`);
+        } else {
+            console.error(`❌ Error loading data: ${error.message}`);
+        }
         return null;
     }
 }
@@ -238,7 +260,41 @@ async function processWallets(action, queryIds, walletData, version, platform) {
             let processedWallet;
             let service;
 
-            if (platform === 'paws') {
+            if (platform === 'notpixel') {
+                try {
+                    if (!version) {
+                        console.log(`❌ Account ${i + 1} - No wallet version specified`);
+                        failCount++;
+                        continue;
+                    }
+
+                    const mnemonic = walletData[i].mnemonic.trim();
+                    if (!mnemonic) {
+                        console.log(`❌ Account ${i + 1} - Invalid mnemonic`);
+                        failCount++;
+                        continue;
+                    }
+
+                    console.log(`Processing ${version.toUpperCase()} wallet...`);
+                    processedWallet = await processWalletData({ mnemonic }, version);
+                    
+                    service = new NotPixelService();
+                    const initialized = await service.init(queryIds[i], {
+                        ...processedWallet,
+                        mnemonic
+                    });
+
+                    if (!initialized) {
+                        console.log(`❌ Account ${i + 1} - ${service.getLastError()}`);
+                        failCount++;
+                        continue;
+                    }
+                } catch (error) {
+                    console.log(`❌ Account ${i + 1} - ${error.message}`);
+                    failCount++;
+                    continue;
+                }
+            } else if (platform === 'paws') {
                 const walletAddress = walletData[i].address;
                 if (!walletAddress) {
                     console.log(`❌ Account ${i + 1} - Invalid wallet address`);
@@ -276,41 +332,6 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                 
                 if (!initialized) {
                     console.log(`❌ Account ${i + 1} - Failed to initialize Clayton service`);
-                    failCount++;
-                    continue;
-                }
-            } else if (platform === 'seeddao') {
-                try {
-                    if (!version) {
-                        console.log(`❌ Account ${i + 1} - No wallet version specified`);
-                        failCount++;
-                        continue;
-                    }
-
-                    const mnemonic = walletData[i].mnemonic.trim();
-                    if (!mnemonic) {
-                        console.log(`❌ Account ${i + 1} - Invalid mnemonic`);
-                        failCount++;
-                        continue;
-                    }
-
-                    console.log(`Processing ${version.toUpperCase()} wallet...`);
-                    processedWallet = await processWalletData({ mnemonic }, version);
-                    
-                    service = new SeedDaoService();
-                    const initialized = await service.init(queryIds[i], {
-                        ...processedWallet,
-                        mnemonic
-                    }, version);
-
-                    if (!initialized) {
-                        console.log(`❌ Account ${i + 1} - Failed to initialize SeedDAO service`);
-                        failCount++;
-                        continue;
-                    }
-
-                } catch (error) {
-                    console.log(`❌ Account ${i + 1} - Error processing wallet: ${error.message}`);
                     failCount++;
                     continue;
                 }
@@ -362,7 +383,11 @@ async function processWallets(action, queryIds, walletData, version, platform) {
                     }
                     successCount++;
                 } else {
-                    console.log(`❌ Account ${i + 1} - Failed to connect wallet`);
+                    if (platform === 'notpixel') {
+                        console.log(`❌ Account ${i + 1} - ${service.getLastError()}`);
+                    } else {
+                        console.log(`❌ Account ${i + 1} - Failed to connect wallet`);
+                    }
                     failCount++;
                 }
             } else if (action === "2") {
@@ -394,8 +419,7 @@ async function processWallets(action, queryIds, walletData, version, platform) {
             }
 
         } catch (error) {
-            console.error(`❌ Account ${i + 1} - Error:`, error);
-            console.error('Stack trace:', error.stack);
+            console.log(`❌ Account ${i + 1} - ${error.message}`);
             failCount++;
         }
     }
@@ -410,7 +434,6 @@ async function processWallets(action, queryIds, walletData, version, platform) {
 
     return { successCount, failCount, totalBalance };
 }
-
 async function main() {
     try {
         // Platform Selection
